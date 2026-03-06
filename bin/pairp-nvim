@@ -11,6 +11,7 @@ fi
 
 NVIM_SERVER="$NVIM"
 
+# Send a Lua expression to the parent Neovim via RPC and print the result.
 nvim_lua() {
   local result
   if ! result=$(nvim --server "$NVIM_SERVER" --remote-expr "luaeval(\"$1\")" 2>&1); then
@@ -20,12 +21,42 @@ nvim_lua() {
   echo "$result"
 }
 
-# Escape for Lua single-quoted string inside Vim's luaeval("...").
-# Two layers: Lua escaping then Vim backslash doubling.
-lua_escape() {
-  local s
-  s=$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g")
-  printf '%s' "$s" | sed -e 's/\\/\\\\/g'
+# Validate that a value is a positive integer.
+require_int() {
+  local label="$1" value="$2"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "Error: expected integer for $label, got '$value'" >&2
+    exit 1
+  fi
+}
+
+# Open a file in the editor. The filepath is base64-encoded before embedding
+# in the Lua expression so that any characters (quotes, backslashes, etc.)
+# are safe. Decoded on the Neovim side with vim.base64.decode().
+open_file() {
+  local file="${1:?file required}"
+  local line="${2:-}"
+  local col="${3:-}"
+
+  # Resolve to absolute path so Neovim opens the right file regardless of cwd
+  local abs_path
+  abs_path=$(cd "$(dirname "$file")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$file")") || abs_path="$file"
+
+  local b64
+  b64=$(printf '%s' "$abs_path" | base64 | tr -d '\n')
+
+  local lua_line="nil"
+  local lua_col="nil"
+  if [ -n "$line" ]; then
+    require_int "line" "$line"
+    lua_line="$line"
+  fi
+  if [ -n "$col" ]; then
+    require_int "col" "$col"
+    lua_col="$col"
+  fi
+
+  nvim_lua "vim.json.encode(PairpActions.open(vim.base64.decode('${b64}'), ${lua_line}, ${lua_col}))"
 }
 
 usage() {
@@ -42,27 +73,10 @@ automatically reload them in real-time (autoread + checktime).
 USAGE
 }
 
-int_or_nil() {
-  local value="${1:-}"
-  if [ -z "$value" ]; then
-    echo "nil"
-    return
-  fi
-  if [[ "$value" =~ ^-?[0-9]+$ ]]; then
-    echo "$value"
-    return
-  fi
-  echo "Error: expected integer argument, got '$value'" >&2
-  exit 1
-}
-
 case "${1:-}" in
   open)
     shift
-    file=$(lua_escape "${1:?file required}")
-    line=$(int_or_nil "${2:-}")
-    col=$(int_or_nil "${3:-}")
-    nvim_lua "vim.json.encode(PairpActions.open('${file}', ${line}, ${col}))"
+    open_file "${1:?file required}" "${2:-}" "${3:-}"
     ;;
 
   buffers)
