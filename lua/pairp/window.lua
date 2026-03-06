@@ -149,7 +149,18 @@ function M.open(cli_path, position, config, session_name)
 	local actions = require("pairp.actions")
 	actions.start_watcher(config and config.watch_interval or 500)
 
-	state.chan = vim.fn.termopen(cli_path, {
+	-- Build command with pairp-nvim instructions appended to Claude's system prompt
+	local pairp_prompt = "You are running inside Neovim via the Pairp plugin. "
+		.. "You have access to the `pairp-nvim` CLI tool which controls the parent Neovim editor. "
+		.. "IMPORTANT: Before you read or edit any file, first run `pairp-nvim open <filepath>` to open it in the user's editor so they can watch your changes in real-time. "
+		.. "Neovim will automatically reload buffers when you write to files on disk. "
+		.. "Available commands:\n"
+		.. "  pairp-nvim open <file> [line] [col]  — open a file in the editor\n"
+		.. "  pairp-nvim buffers                   — list open editor buffers\n"
+
+	local cmd = cli_path .. " --append-system-prompt " .. vim.fn.shellescape(pairp_prompt)
+
+	state.chan = vim.fn.termopen(cmd, {
 		env = env,
 		on_exit = function()
 			state.chan = nil
