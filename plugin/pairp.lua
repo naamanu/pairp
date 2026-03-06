@@ -3,9 +3,8 @@ if vim.g.loaded_pairp then
 end
 vim.g.loaded_pairp = true
 
-vim.api.nvim_create_user_command("Pairp", function(opts)
-	require("pairp").run(opts.args)
+vim.api.nvim_create_user_command("Pairp", function()
+	require("pairp").toggle()
 end, {
-	nargs = "?",
-	desc = "Send a prompt to Claude Code",
+	desc = "Toggle Claude Code chat window",
 })

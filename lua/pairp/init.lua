@@ -1,4 +1,3 @@
-local process = require("pairp.process")
 local window = require("pairp.window")
 
 local M = {}
@@ -15,45 +14,16 @@ function M.setup(opts)
 	end
 
 	vim.keymap.set("n", M.config.keymap, function()
-		M.prompt()
-	end, { desc = "Pairp: prompt Claude Code" })
+		M.toggle()
+	end, { desc = "Pairp: toggle Claude Code" })
 end
 
-function M.prompt()
-	vim.ui.input({ prompt = "Pairp> " }, function(input)
-		if not input or input == "" then
-			return
-		end
-		M.run(input)
-	end)
+function M.toggle()
+	window.toggle(M.config.cli_path)
 end
 
-function M.run(input)
-	if not input or input == "" then
-		M.prompt()
-		return
-	end
-
-	local win = window.open()
-
-	window.set_title(win, "Pairp: thinking...")
-
-	process.exec(M.config.cli_path, input, {
-		on_stdout = function(chunk)
-			vim.schedule(function()
-				window.append(win, chunk)
-			end)
-		end,
-		on_exit = function(code)
-			vim.schedule(function()
-				if code == 0 then
-					window.set_title(win, "Pairp: done")
-				else
-					window.set_title(win, "Pairp: error (exit " .. code .. ")")
-				end
-			end)
-		end,
-	})
+function M.open()
+	window.open(M.config.cli_path)
 end
 
 return M
