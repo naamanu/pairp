@@ -71,7 +71,7 @@ vim.api.nvim_set_hl(0, "PairpTitle", { fg = "#bb9af7", bold = true })
 
 | Command | Description |
 |---|---|
-| `:Pairp [session]` | Toggle the Claude Code window (optional named session) |
+| `:PairpToggle [session]` | Toggle the Claude Code window (optional named session) |
 | `:'<,'>PairpSend [session]` | Send visual selection to the running Claude session |
 | `:PairpSendFile [session]` | Send the entire current buffer to Claude |
 | `:PairpContext [session]` | Send the current file path to Claude as context |
@@ -97,8 +97,8 @@ All commands that accept `[session]` support tab-completion of active session na
 Run multiple Claude sessions in parallel:
 
 ```vim
-:Pairp debug
-:Pairp refactor
+:PairpToggle debug
+:PairpToggle refactor
 :PairpList
 :PairpClose debug
 ```

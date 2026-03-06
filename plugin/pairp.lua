@@ -7,7 +7,7 @@ local function session_complete()
 	return require("pairp.window").list_sessions()
 end
 
-vim.api.nvim_create_user_command("Pairp", function(opts)
+vim.api.nvim_create_user_command("PairpToggle", function(opts)
 	local session = opts.args ~= "" and opts.args or nil
 	require("pairp").toggle(session)
 end, {
