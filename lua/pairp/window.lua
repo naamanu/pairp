@@ -137,9 +137,23 @@ function M.open(cli_path, position, config, session_name)
 	state.win = vim.api.nvim_open_win(state.buf, true, opts)
 	vim.api.nvim_set_option_value("winhl", "Normal:PairpNormal,FloatBorder:PairpBorder", { win = state.win })
 
+	-- Inject pairp bin directory into PATH so Claude can use pairp-nvim
+	local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
+	local bin_dir = plugin_root .. "/bin"
+	local env = {
+		PAIRP = "1",
+		PATH = bin_dir .. ":" .. (vim.env.PATH or ""),
+	}
+
+	-- Start file watcher so buffers auto-reload when Claude edits files
+	local actions = require("pairp.actions")
+	actions.start_watcher(config and config.watch_interval or 500)
+
 	state.chan = vim.fn.termopen(cli_path, {
+		env = env,
 		on_exit = function()
 			state.chan = nil
+			actions.stop_watcher()
 			if is_valid(state) then
 				vim.api.nvim_win_close(state.win, true)
 			end

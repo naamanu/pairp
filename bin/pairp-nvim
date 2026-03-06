@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# pairp-nvim — bridge for Claude Code to control the parent Neovim instance.
+# Requires $NVIM to be set (automatic when running inside Neovim terminal).
+
+set -euo pipefail
+
+if [ -z "${NVIM:-}" ]; then
+  echo "Error: \$NVIM not set — not running inside Neovim" >&2
+  exit 1
+fi
+
+NVIM_SERVER="$NVIM"
+
+nvim_lua() {
+  nvim --server "$NVIM_SERVER" --remote-expr "luaeval(\"$1\")"
+}
+
+# Escape for Lua single-quoted string inside Vim's luaeval("...").
+# Two layers: Lua escaping then Vim backslash doubling.
+lua_escape() {
+  local s
+  s=$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g")
+  printf '%s' "$s" | sed -e 's/\\/\\\\/g'
+}
+
+usage() {
+  cat <<'USAGE'
+pairp-nvim — control Neovim from Claude Code
+
+Commands:
+  open <file> [line] [col]    Open a file in the editor window
+  buffers                     List open buffers
+  help                        Show this help
+
+When you edit files with your normal tools, Neovim will
+automatically reload them in real-time (autoread + checktime).
+USAGE
+}
+
+case "${1:-}" in
+  open)
+    shift
+    file=$(lua_escape "${1:?file required}")
+    line="${2:-nil}"
+    col="${3:-nil}"
+    nvim_lua "vim.json.encode(PairpActions.open('${file}', ${line}, ${col}))"
+    ;;
+
+  buffers)
+    nvim_lua "vim.json.encode(PairpActions.buffers())"
+    ;;
+
+  help|--help|-h|"")
+    usage
+    ;;
+
+  *)
+    echo "Unknown command: $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
