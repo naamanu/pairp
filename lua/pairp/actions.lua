@@ -2,6 +2,7 @@ local M = {}
 
 local watcher_timer = nil
 local watcher_refs = 0
+local watcher_augroup = nil
 
 --- Open a file in a non-floating, non-terminal editor window.
 --- Prefers the most recently used editor window over the first found.
@@ -61,15 +62,6 @@ function M.open(filepath, line, col)
 	-- Enable autoread so external changes are picked up
 	vim.api.nvim_set_option_value("autoread", true, { buf = 0 })
 
-	-- Auto-reload without prompting when the file is created on disk
-	local buf = vim.api.nvim_get_current_buf()
-	vim.api.nvim_create_autocmd("FileChangedShell", {
-		buffer = buf,
-		callback = function()
-			vim.v.fcs_choice = "reload"
-		end,
-	})
-
 	local opened_file = vim.api.nvim_buf_get_name(0)
 
 	if line then
@@ -99,6 +91,16 @@ function M.start_watcher(interval_ms)
 	interval_ms = interval_ms or 500
 	vim.o.autoread = true
 
+	-- Auto-reload all files without prompting while Claude is active
+	watcher_augroup = vim.api.nvim_create_augroup("pairp_file_watcher", { clear = true })
+	vim.api.nvim_create_autocmd("FileChangedShell", {
+		group = watcher_augroup,
+		pattern = "*",
+		callback = function()
+			vim.v.fcs_choice = "reload"
+		end,
+	})
+
 	watcher_timer = vim.uv.new_timer()
 	watcher_timer:start(
 		0,
@@ -121,6 +123,10 @@ function M.stop_watcher()
 		watcher_timer:stop()
 		watcher_timer:close()
 		watcher_timer = nil
+	end
+	if watcher_augroup then
+		vim.api.nvim_del_augroup_by_id(watcher_augroup)
+		watcher_augroup = nil
 	end
 end
 
