@@ -106,7 +106,7 @@ local function win_opts(position, config, session_name)
 		border = border,
 		title = { { title, "PairpTitle" } },
 		title_pos = "center",
-		footer = { { " q:hide  <Esc><Esc>:normal  <C-w>:navigate ", "PairpFooter" } },
+		footer = { { " <C-q>:hide  <Esc><Esc>:normal  <C-w>:navigate ", "PairpFooter" } },
 		footer_pos = "center",
 	}
 end
@@ -161,6 +161,11 @@ function M.open(cli_path, position, config, session_name)
 
 	-- Double <Esc> exits terminal mode
 	vim.keymap.set("t", "<Esc><Esc>", [[<C-\><C-n>]], { buffer = state.buf, desc = "Exit terminal mode" })
+
+	-- <C-q> hides the window from terminal mode
+	vim.keymap.set("t", "<C-q>", function()
+		M.hide(session_name)
+	end, { buffer = state.buf, desc = "Hide Pairp window" })
 
 	-- <C-w> navigation from terminal mode
 	for _, key in ipairs({ "h", "j", "k", "l" }) do

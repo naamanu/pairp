@@ -88,6 +88,7 @@ All commands that accept `[session]` support tab-completion of active session na
 | `<leader>cs` | Visual | Send selection to Claude |
 | `<leader>cx` | Normal | Send current file path as context |
 | `q` | Normal (in Pairp window) | Hide the window (keeps session alive) |
+| `<C-q>` | Terminal (in Pairp window) | Hide the window from terminal mode |
 | `<Esc><Esc>` | Terminal (in Pairp window) | Exit terminal mode |
 | `<C-w>h/j/k/l` | Terminal (in Pairp window) | Navigate to adjacent editor windows |
 
