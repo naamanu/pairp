@@ -69,4 +69,3 @@ end, {
 	nargs = "?",
 	complete = session_complete,
 })
-

@@ -1,8 +1,10 @@
 local M = {}
 
 local watcher_timer = nil
+local watcher_refs = 0
 
 --- Open a file in a non-floating, non-terminal editor window.
+--- Prefers the most recently used editor window over the first found.
 --- @param filepath string absolute or relative path
 --- @param line number|nil optional line to jump to
 --- @param col number|nil optional column to jump to
@@ -11,28 +13,55 @@ function M.open(filepath, line, col)
 		return { ok = false, error = "filepath is required" }
 	end
 
-	-- Find a regular editor window (not floating, not terminal)
-	local target_win = nil
+	-- Collect candidate windows (non-floating, non-terminal)
+	local candidates = {}
 	for _, win in ipairs(vim.api.nvim_list_wins()) do
 		local cfg = vim.api.nvim_win_get_config(win)
 		local buf = vim.api.nvim_win_get_buf(win)
 		local bt = vim.api.nvim_get_option_value("buftype", { buf = buf })
 		if cfg.relative == "" and bt ~= "terminal" then
-			target_win = win
-			break
+			table.insert(candidates, win)
 		end
 	end
 
-	if not target_win then
+	local target_win
+	if #candidates > 0 then
+		-- Prefer the previous window (most recently used) if it's a candidate
+		local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))
+		for _, win in ipairs(candidates) do
+			if win == prev_win then
+				target_win = win
+				break
+			end
+		end
+		-- Fall back to the largest candidate window
+		if not target_win then
+			local max_area = 0
+			for _, win in ipairs(candidates) do
+				local w = vim.api.nvim_win_get_width(win)
+				local h = vim.api.nvim_win_get_height(win)
+				local area = w * h
+				if area > max_area then
+					max_area = area
+					target_win = win
+				end
+			end
+		end
+	else
 		vim.cmd("topleft vsplit")
 		target_win = vim.api.nvim_get_current_win()
 	end
+
+	-- Save current window so we can restore focus after opening
+	local prev_win = vim.api.nvim_get_current_win()
 
 	vim.api.nvim_set_current_win(target_win)
 	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 
 	-- Enable autoread so external changes are picked up
 	vim.api.nvim_set_option_value("autoread", true, { buf = 0 })
+
+	local opened_file = vim.api.nvim_buf_get_name(0)
 
 	if line then
 		local total = vim.api.nvim_buf_line_count(0)
@@ -42,12 +71,18 @@ function M.open(filepath, line, col)
 		vim.cmd("normal! zz")
 	end
 
-	return { ok = true, file = vim.api.nvim_buf_get_name(0) }
+	-- Restore focus to the previous window (e.g. the Pairp terminal)
+	if vim.api.nvim_win_is_valid(prev_win) then
+		vim.api.nvim_set_current_win(prev_win)
+	end
+
+	return { ok = true, file = opened_file }
 end
 
 --- Start a timer that polls for external file changes.
---- Runs checktime every interval_ms to reload buffers modified on disk.
+--- Uses reference counting so multiple sessions share one watcher.
 function M.start_watcher(interval_ms)
+	watcher_refs = watcher_refs + 1
 	if watcher_timer then
 		return
 	end
@@ -60,7 +95,6 @@ function M.start_watcher(interval_ms)
 		0,
 		interval_ms,
 		vim.schedule_wrap(function()
-			-- Only run checktime if we're not in a prompt or cmdline
 			if vim.fn.getcmdwintype() == "" then
 				vim.cmd("silent! checktime")
 			end
@@ -68,8 +102,12 @@ function M.start_watcher(interval_ms)
 	)
 end
 
---- Stop the file change watcher.
+--- Decrement watcher reference count; stop when no sessions remain.
 function M.stop_watcher()
+	watcher_refs = math.max(0, watcher_refs - 1)
+	if watcher_refs > 0 then
+		return
+	end
 	if watcher_timer then
 		watcher_timer:stop()
 		watcher_timer:close()

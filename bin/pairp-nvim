@@ -12,7 +12,12 @@ fi
 NVIM_SERVER="$NVIM"
 
 nvim_lua() {
-  nvim --server "$NVIM_SERVER" --remote-expr "luaeval(\"$1\")"
+  local result
+  if ! result=$(nvim --server "$NVIM_SERVER" --remote-expr "luaeval(\"$1\")" 2>&1); then
+    echo "{\"ok\":false,\"error\":\"Neovim RPC failed: ${result//\"/\\\"}\"}"
+    return 1
+  fi
+  echo "$result"
 }
 
 # Escape for Lua single-quoted string inside Vim's luaeval("...").
