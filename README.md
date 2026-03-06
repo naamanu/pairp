@@ -1,6 +1,6 @@
 # pairp
 
-A Neovim plugin that embeds [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in a floating terminal window.
+A Neovim plugin that embeds [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in a styled floating terminal window.
 
 ## Requirements
 
@@ -37,14 +37,32 @@ All options with their defaults:
 
 ```lua
 require("pairp").setup({
-  keymap = "<leader>cc",       -- toggle the chat window
-  send_keymap = "<leader>cs",  -- send visual selection to Claude
+  keymap = "<leader>cc",         -- toggle the chat window
+  send_keymap = "<leader>cs",    -- send visual selection to Claude
   context_keymap = "<leader>cx", -- send current file path as context
-  cli_path = "claude",         -- path to the Claude Code CLI
-  position = "right",          -- "right", "left", "center", "top", "bottom"
-  width = 0.4,                 -- width as a fraction of the editor (0.0 - 1.0)
-  height = 0.8,                -- height as a fraction of the editor (0.0 - 1.0)
+  cli_path = "claude",           -- path to the Claude Code CLI
+  position = "right",            -- "right", "left", "center", "top", "bottom"
+  width = 0.4,                   -- width as a fraction of the editor (0.0 - 1.0)
+  height = 0.8,                  -- height as a fraction of the editor (0.0 - 1.0)
 })
+```
+
+### Custom Highlights
+
+Pairp defines highlight groups you can override in your colorscheme:
+
+| Highlight Group | Default Link | Used For |
+|---|---|---|
+| `PairpBorder` | `FloatBorder` | Window border |
+| `PairpTitle` | `Title` | Window title |
+| `PairpFooter` | `Comment` | Keybinding hints in footer |
+| `PairpNormal` | `NormalFloat` | Window background |
+
+Example:
+
+```lua
+vim.api.nvim_set_hl(0, "PairpBorder", { fg = "#7aa2f7" })
+vim.api.nvim_set_hl(0, "PairpTitle", { fg = "#bb9af7", bold = true })
 ```
 
 ## Usage
@@ -55,7 +73,12 @@ require("pairp").setup({
 |---|---|
 | `:Pairp [session]` | Toggle the Claude Code window (optional named session) |
 | `:'<,'>PairpSend [session]` | Send visual selection to the running Claude session |
+| `:PairpSendFile [session]` | Send the entire current buffer to Claude |
 | `:PairpContext [session]` | Send the current file path to Claude as context |
+| `:PairpList` | List all active sessions |
+| `:PairpClose [session]` | Kill a session and its terminal |
+
+All commands that accept `[session]` support tab-completion of active session names.
 
 ### Keymaps
 
@@ -66,14 +89,17 @@ require("pairp").setup({
 | `<leader>cx` | Normal | Send current file path as context |
 | `q` | Normal (in Pairp window) | Hide the window (keeps session alive) |
 | `<Esc><Esc>` | Terminal (in Pairp window) | Exit terminal mode |
+| `<C-w>h/j/k/l` | Terminal (in Pairp window) | Navigate to adjacent editor windows |
 
 ### Named Sessions
 
-You can run multiple Claude sessions in parallel:
+Run multiple Claude sessions in parallel:
 
 ```vim
 :Pairp debug
 :Pairp refactor
+:PairpList
+:PairpClose debug
 ```
 
 ### Health Check
@@ -86,4 +112,4 @@ Verify your setup:
 
 ## License
 
-MIT
+[MIT](LICENSE)

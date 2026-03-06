@@ -13,6 +13,11 @@ M.config = {
 }
 
 function M.setup(opts)
+	if vim.fn.has("nvim-0.10") ~= 1 then
+		vim.notify("Pairp requires Neovim >= 0.10", vim.log.levels.ERROR)
+		return
+	end
+
 	opts = opts or {}
 	for k, v in pairs(opts) do
 		M.config[k] = v
@@ -39,6 +44,10 @@ function M.open(session_name)
 	window.open(M.config.cli_path, M.config.position, M.config, session_name)
 end
 
+function M.close(session_name)
+	window.close(session_name)
+end
+
 function M.send_selection(session_name)
 	local lines = vim.fn.getregion(vim.fn.getpos("v"), vim.fn.getpos("."), { type = vim.fn.mode() })
 	if #lines == 0 then
@@ -56,6 +65,18 @@ function M.send_context(session_name)
 		return
 	end
 	window.send_text("Current file: " .. file .. "\n", session_name)
+end
+
+function M.send_file(session_name)
+	local file = vim.api.nvim_buf_get_name(0)
+	local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	if #buf_lines == 0 then
+		vim.notify("Pairp: buffer is empty", vim.log.levels.WARN)
+		return
+	end
+	local header = file ~= "" and ("--- " .. file .. " ---\n") or "--- untitled buffer ---\n"
+	local text = header .. table.concat(buf_lines, "\n") .. "\n"
+	window.send_text(text, session_name)
 end
 
 return M
