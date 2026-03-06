@@ -19,7 +19,7 @@ end
 
 local function file_exists(path)
 	local stat = vim.uv.fs_stat(path)
-	return stat and stat.type == "file" or false
+	return stat ~= nil and stat.type == "file"
 end
 
 local function reload_created_files()
@@ -106,7 +106,7 @@ function M.open(filepath, line, col)
 	local prev_win = vim.api.nvim_get_current_win()
 
 	vim.api.nvim_set_current_win(target_win)
-	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+	vim.cmd("silent edit " .. vim.fn.fnameescape(filepath))
 
 	-- Enable autoread so external changes are picked up
 	vim.api.nvim_set_option_value("autoread", true, { buf = 0 })
