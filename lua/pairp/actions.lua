@@ -3,6 +3,55 @@ local M = {}
 local watcher_timer = nil
 local watcher_refs = 0
 local watcher_augroup = nil
+local buffer_file_exists = {}
+
+local function is_file_buffer(buf)
+	if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_buf_is_loaded(buf) then
+		return false
+	end
+	local bt = vim.api.nvim_get_option_value("buftype", { buf = buf })
+	if bt ~= "" then
+		return false
+	end
+	local name = vim.api.nvim_buf_get_name(buf)
+	return name ~= ""
+end
+
+local function file_exists(path)
+	local stat = vim.uv.fs_stat(path)
+	return stat and stat.type == "file" or false
+end
+
+local function reload_created_files()
+	for buf, _ in pairs(buffer_file_exists) do
+		if not vim.api.nvim_buf_is_valid(buf) then
+			buffer_file_exists[buf] = nil
+		end
+	end
+
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if is_file_buffer(buf) then
+			local name = vim.api.nvim_buf_get_name(buf)
+			local exists_now = file_exists(name)
+			local existed_before = buffer_file_exists[buf]
+
+			if existed_before == nil then
+				buffer_file_exists[buf] = exists_now
+			elseif not existed_before and exists_now then
+				local modified = vim.api.nvim_get_option_value("modified", { buf = buf })
+				if not modified then
+					-- Avoid W13 ("created after editing started") by explicitly re-reading the buffer.
+					vim.api.nvim_buf_call(buf, function()
+						vim.cmd("silent! keepalt keepjumps edit")
+					end)
+				end
+				buffer_file_exists[buf] = true
+			else
+				buffer_file_exists[buf] = exists_now
+			end
+		end
+	end
+end
 
 --- Open a file in a non-floating, non-terminal editor window.
 --- Prefers the most recently used editor window over the first found.
@@ -88,16 +137,34 @@ function M.start_watcher(interval_ms)
 		return
 	end
 
+	buffer_file_exists = {}
 	interval_ms = interval_ms or 500
 	vim.o.autoread = true
 
-	-- Auto-reload all files without prompting while Claude is active
-	-- Use vimscript autocmd because setting vim.v.fcs_choice from Lua
-	-- callbacks does not reliably suppress the W13 confirm prompt.
+	-- Auto-reload changed files without prompting while Claude is active.
+	-- W13 ("created after editing started") is handled separately in reload_created_files().
 	watcher_augroup = vim.api.nvim_create_augroup("pairp_file_watcher", { clear = true })
 	vim.cmd([[
 		autocmd pairp_file_watcher FileChangedShell * let v:fcs_choice = 'reload'
 	]])
+	vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile" }, {
+		group = watcher_augroup,
+		pattern = "*",
+		callback = function(args)
+			local buf = args.buf
+			if is_file_buffer(buf) then
+				local name = vim.api.nvim_buf_get_name(buf)
+				buffer_file_exists[buf] = file_exists(name)
+			end
+		end,
+	})
+	vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+		group = watcher_augroup,
+		pattern = "*",
+		callback = function(args)
+			buffer_file_exists[args.buf] = nil
+		end,
+	})
 
 	watcher_timer = vim.uv.new_timer()
 	watcher_timer:start(
@@ -105,6 +172,7 @@ function M.start_watcher(interval_ms)
 		interval_ms,
 		vim.schedule_wrap(function()
 			if vim.fn.getcmdwintype() == "" then
+				reload_created_files()
 				vim.cmd("silent! checktime")
 			end
 		end)
@@ -126,6 +194,7 @@ function M.stop_watcher()
 		vim.api.nvim_del_augroup_by_id(watcher_augroup)
 		watcher_augroup = nil
 	end
+	buffer_file_exists = {}
 end
 
 --- List open file buffers.
