@@ -61,6 +61,15 @@ function M.open(filepath, line, col)
 	-- Enable autoread so external changes are picked up
 	vim.api.nvim_set_option_value("autoread", true, { buf = 0 })
 
+	-- Auto-reload without prompting when the file is created on disk
+	local buf = vim.api.nvim_get_current_buf()
+	vim.api.nvim_create_autocmd("FileChangedShell", {
+		buffer = buf,
+		callback = function()
+			vim.v.fcs_choice = "reload"
+		end,
+	})
+
 	local opened_file = vim.api.nvim_buf_get_name(0)
 
 	if line then
