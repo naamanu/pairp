@@ -3,6 +3,9 @@ if vim.g.loaded_pairp then
 end
 vim.g.loaded_pairp = true
 
+-- Register actions globally so they're callable via RPC from the terminal
+require("pairp.actions").register()
+
 local function session_complete()
 	return require("pairp.window").list_sessions()
 end

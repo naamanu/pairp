@@ -2,6 +2,33 @@ local M = {}
 
 local sessions = {}
 
+local function normalize_session_name(name)
+	if name == nil or name == "" then
+		return "default"
+	end
+	return name
+end
+
+local function get_state(name)
+	return sessions[normalize_session_name(name)]
+end
+
+local function ensure_state(name)
+	local session_name = normalize_session_name(name)
+	if not sessions[session_name] then
+		sessions[session_name] = { buf = nil, win = nil, chan = nil, name = session_name }
+	end
+	return sessions[session_name]
+end
+
+local function clear_state(name)
+	sessions[normalize_session_name(name)] = nil
+end
+
+local function clamp(value, min_value, max_value)
+	return math.max(min_value, math.min(max_value, value))
+end
+
 local function setup_highlights()
 	local has_border = vim.api.nvim_get_hl(0, { name = "PairpBorder" })
 	if vim.tbl_isempty(has_border) then
@@ -24,68 +51,65 @@ local function setup_highlights()
 	end
 end
 
-local function get_state(name)
-	name = name or "default"
-	if not sessions[name] then
-		sessions[name] = { buf = nil, win = nil, chan = nil, name = name }
-	end
-	return sessions[name]
-end
-
 local function is_valid(state)
-	return state.buf
-		and vim.api.nvim_buf_is_valid(state.buf)
-		and state.win
-		and vim.api.nvim_win_is_valid(state.win)
+	return state.buf and vim.api.nvim_buf_is_valid(state.buf) and state.win and vim.api.nvim_win_is_valid(state.win)
 end
 
 local function build_border(position)
-	if position == "right" then
-		return { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
-	elseif position == "left" then
-		return { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
-	elseif position == "top" or position == "bottom" then
-		return { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
-	else -- center
+	if
+		position == "right"
+		or position == "left"
+		or position == "top"
+		or position == "bottom"
+		or position == "center"
+	then
 		return { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
 	end
+	return { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
 end
 
 local function win_opts(position, config, session_name)
-	local columns = vim.o.columns
-	local lines = vim.o.lines
+	local columns = math.max(1, vim.o.columns)
+	local lines = math.max(3, vim.o.lines - 2)
 
-	local width_pct = (config and config.width) or 0.4
-	local height_pct = (config and config.height) or 0.8
+	local width_value = (config and type(config.width) == "number") and config.width or 0.4
+	local height_value = (config and type(config.height) == "number") and config.height or 0.8
+	local width_pct = clamp(width_value, 0.1, 1)
+	local height_pct = clamp(height_value, 0.1, 1)
+	local min_width = math.min(20, columns)
+	local min_height = math.min(5, lines)
 
 	local width, height, row, col
 
 	if position == "right" then
-		width = math.floor(columns * width_pct)
-		height = lines - 2
+		width = clamp(math.floor(columns * width_pct), min_width, columns)
+		height = lines
 		row = 0
 		col = columns - width
 	elseif position == "left" then
-		width = math.floor(columns * width_pct)
-		height = lines - 2
+		width = clamp(math.floor(columns * width_pct), min_width, columns)
+		height = lines
 		row = 0
 		col = 0
 	elseif position == "top" then
 		width = columns
-		height = math.floor(lines * height_pct)
+		height = clamp(math.floor(lines * height_pct), min_height, lines)
 		row = 0
 		col = 0
 	elseif position == "bottom" then
 		width = columns
-		height = math.floor(lines * height_pct)
-		row = lines - height - 2
+		height = clamp(math.floor(lines * height_pct), min_height, lines)
+		row = lines - height
 		col = 0
 	else -- "center"
-		width = math.floor(columns * width_pct)
-		height = math.floor(lines * height_pct)
+		width = clamp(math.floor(columns * width_pct), min_width, columns)
+		height = clamp(math.floor(lines * height_pct), min_height, lines)
 		row = math.floor((lines - height) / 2)
 		col = math.floor((columns - width) / 2)
 	end
+
+	row = math.max(0, row)
+	col = math.max(0, col)
 
 	local display_name = (session_name and session_name ~= "default") and session_name or nil
 	local title = display_name and (" Pairp: " .. display_name .. " ") or " Pairp "
@@ -113,7 +137,13 @@ end
 
 function M.open(cli_path, position, config, session_name)
 	setup_highlights()
-	local state = get_state(session_name)
+
+	if vim.fn.executable(cli_path) ~= 1 then
+		vim.notify("Pairp: CLI not found: " .. cli_path, vim.log.levels.ERROR)
+		return
+	end
+
+	local state = ensure_state(session_name)
 
 	-- If already open, focus it and enter insert mode
 	if is_valid(state) then
@@ -137,20 +167,66 @@ function M.open(cli_path, position, config, session_name)
 	state.win = vim.api.nvim_open_win(state.buf, true, opts)
 	vim.api.nvim_set_option_value("winhl", "Normal:PairpNormal,FloatBorder:PairpBorder", { win = state.win })
 
-	state.chan = vim.fn.termopen(cli_path, {
+	-- Inject pairp bin directory into PATH so Claude can use pairp-nvim
+	local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
+	local bin_dir = plugin_root .. "/bin"
+	local env = {
+		PAIRP = "1",
+		PATH = bin_dir .. ":" .. (vim.env.PATH or ""),
+	}
+
+	-- Start file watcher so buffers auto-reload when Claude edits files
+	local actions = require("pairp.actions")
+	actions.start_watcher(config and config.watch_interval or 500)
+
+	local augroup = nil
+	local function cleanup_state()
+		state.chan = nil
+		actions.stop_watcher()
+		if augroup then
+			pcall(vim.api.nvim_del_augroup_by_id, augroup)
+			augroup = nil
+		end
+		if state.win and vim.api.nvim_win_is_valid(state.win) then
+			vim.api.nvim_win_close(state.win, true)
+		end
+		if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+			vim.api.nvim_buf_delete(state.buf, { force = true })
+		end
+		state.buf = nil
+		state.win = nil
+		clear_state(state.name)
+	end
+
+	-- Build command with pairp-nvim instructions appended to Claude's system prompt
+	local pairp_prompt = table.concat({
+		"You are running inside Neovim via the Pairp plugin.",
+		"You have access to the `pairp-nvim` CLI tool which controls the parent Neovim editor.",
+		"IMPORTANT: Before you create, read, or edit any file, ALWAYS first run `pairp-nvim open <filepath>` to open it in the user's editor buffer so they can watch your changes in real-time.",
+		"Neovim will automatically reload buffers when you write to files on disk.",
+		"The user can see the file in their editor as you work on it.",
+		"Use the editor buffer as the primary surface for showing code changes - the user is watching the file update live.",
+		"Do NOT paste large code blocks in this terminal. Instead, write changes directly to the file so the user sees them in the editor.",
+		"After making changes to a file, ask the user to review the changes in their editor buffer and confirm before moving on.",
+		"Available commands:",
+		"  pairp-nvim open <file> [line] [col]  - open a file in the editor",
+		"  pairp-nvim buffers                   - list open editor buffers",
+	}, " ")
+
+	local cmd = { cli_path, "--append-system-prompt", pairp_prompt }
+
+	state.chan = vim.fn.termopen(cmd, {
+		env = env,
 		on_exit = function()
-			state.chan = nil
-			if is_valid(state) then
-				vim.api.nvim_win_close(state.win, true)
-			end
-			if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
-				vim.api.nvim_buf_delete(state.buf, { force = true })
-			end
-			state.buf = nil
-			state.win = nil
-			sessions[state.name] = nil
+			cleanup_state()
 		end,
 	})
+
+	if state.chan <= 0 then
+		cleanup_state()
+		vim.notify("Pairp: failed to start Claude Code", vim.log.levels.ERROR)
+		return
+	end
 
 	vim.cmd.startinsert()
 
@@ -176,14 +252,12 @@ function M.open(cli_path, position, config, session_name)
 	end
 
 	-- Reposition window on terminal resize
-	local augroup = vim.api.nvim_create_augroup("pairp_resize_" .. state.name, { clear = true })
+	augroup = vim.api.nvim_create_augroup("pairp_resize_" .. state.name, { clear = true })
 	vim.api.nvim_create_autocmd("VimResized", {
 		group = augroup,
 		callback = function()
 			if is_valid(state) then
 				vim.api.nvim_win_set_config(state.win, win_opts(position, config, session_name))
-			else
-				vim.api.nvim_del_augroup_by_id(augroup)
 			end
 		end,
 	})
@@ -191,6 +265,9 @@ end
 
 function M.hide(session_name)
 	local state = get_state(session_name)
+	if not state then
+		return
+	end
 	if state.win and vim.api.nvim_win_is_valid(state.win) then
 		vim.api.nvim_win_close(state.win, true)
 		state.win = nil
@@ -199,14 +276,19 @@ end
 
 function M.close(session_name)
 	local state = get_state(session_name)
+	if not state then
+		return
+	end
 	if state.chan then
 		vim.fn.jobstop(state.chan)
+	else
+		clear_state(session_name)
 	end
 end
 
 function M.toggle(cli_path, position, config, session_name)
 	local state = get_state(session_name)
-	if is_valid(state) then
+	if state and is_valid(state) then
 		M.hide(session_name)
 	else
 		M.open(cli_path, position, config, session_name)
@@ -215,7 +297,7 @@ end
 
 function M.send_text(text, session_name)
 	local state = get_state(session_name)
-	if not state.chan then
+	if not state or not state.chan then
 		vim.notify("Pairp: no active session", vim.log.levels.WARN)
 		return
 	end
@@ -224,9 +306,20 @@ end
 
 function M.list_sessions()
 	local names = {}
-	for name, _ in pairs(sessions) do
-		table.insert(names, name)
+	local stale = {}
+	for name, state in pairs(sessions) do
+		local has_buf = state.buf and vim.api.nvim_buf_is_valid(state.buf)
+		local has_win = state.win and vim.api.nvim_win_is_valid(state.win)
+		if state.chan or has_buf or has_win then
+			table.insert(names, name)
+		else
+			table.insert(stale, name)
+		end
 	end
+	for _, name in ipairs(stale) do
+		sessions[name] = nil
+	end
+	table.sort(names)
 	return names
 end
 

@@ -44,6 +44,7 @@ require("pairp").setup({
   position = "right",            -- "right", "left", "center", "top", "bottom"
   width = 0.4,                   -- width as a fraction of the editor (0.0 - 1.0)
   height = 0.8,                  -- height as a fraction of the editor (0.0 - 1.0)
+  watch_interval = 500,          -- file watcher interval in ms (for live buffer reload)
 })
 ```
 
@@ -91,6 +92,18 @@ All commands that accept `[session]` support tab-completion of active session na
 | `<C-q>` | Terminal (in Pairp window) | Hide the window from terminal mode |
 | `<Esc><Esc>` | Terminal (in Pairp window) | Exit terminal mode |
 | `<C-w>h/j/k/l` | Terminal (in Pairp window) | Navigate to adjacent editor windows |
+
+### Live Buffer Reload
+
+When a Pairp session is active, Neovim automatically detects and reloads files that Claude edits on disk. This means you can watch changes appear in your editor buffers in real-time as Claude writes code.
+
+Claude can also open files in your editor before editing them using the `pairp-nvim` bridge (automatically available inside the Pairp terminal):
+
+```bash
+pairp-nvim open src/main.lua        # open a file in the editor
+pairp-nvim open src/main.lua 42     # open and jump to line 42
+pairp-nvim buffers                  # list open buffers
+```
 
 ### Named Sessions
 

@@ -10,6 +10,7 @@ M.config = {
 	position = "right", -- "right", "left", "center", "top", "bottom"
 	width = 0.4,
 	height = 0.8,
+	watch_interval = 500,
 }
 
 function M.setup(opts)
@@ -19,6 +20,10 @@ function M.setup(opts)
 	end
 
 	opts = opts or {}
+	if type(opts) ~= "table" then
+		vim.notify("Pairp: setup options must be a table", vim.log.levels.ERROR)
+		return
+	end
 	for k, v in pairs(opts) do
 		M.config[k] = v
 	end
