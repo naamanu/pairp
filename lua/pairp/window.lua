@@ -1,24 +1,64 @@
 local M = {}
 
-local state = {
-	buf = nil,
-	win = nil,
-	chan = nil,
-}
+local sessions = {}
 
-local function is_valid()
-	return state.buf and vim.api.nvim_buf_is_valid(state.buf) and state.win and vim.api.nvim_win_is_valid(state.win)
+local function get_state(name)
+	name = name or "default"
+	if not sessions[name] then
+		sessions[name] = { buf = nil, win = nil, chan = nil, name = name }
+	end
+	return sessions[name]
 end
 
-local function win_opts()
-	local width = math.floor(vim.o.columns * 0.8)
-	local height = math.floor(vim.o.lines * 0.8)
+local function is_valid(state)
+	return state.buf
+		and vim.api.nvim_buf_is_valid(state.buf)
+		and state.win
+		and vim.api.nvim_win_is_valid(state.win)
+end
+
+local function win_opts(position, config)
+	local columns = vim.o.columns
+	local lines = vim.o.lines
+
+	local width_pct = (config and config.width) or 0.4
+	local height_pct = (config and config.height) or 0.8
+
+	local width, height, row, col
+
+	if position == "right" then
+		width = math.floor(columns * width_pct)
+		height = lines - 2
+		row = 0
+		col = columns - width
+	elseif position == "left" then
+		width = math.floor(columns * width_pct)
+		height = lines - 2
+		row = 0
+		col = 0
+	elseif position == "top" then
+		width = columns
+		height = math.floor(lines * height_pct)
+		row = 0
+		col = 0
+	elseif position == "bottom" then
+		width = columns
+		height = math.floor(lines * height_pct)
+		row = lines - height - 2
+		col = 0
+	else -- "center"
+		width = math.floor(columns * width_pct)
+		height = math.floor(lines * height_pct)
+		row = math.floor((lines - height) / 2)
+		col = math.floor((columns - width) / 2)
+	end
+
 	return {
 		relative = "editor",
 		width = width,
 		height = height,
-		row = math.floor((vim.o.lines - height) / 2),
-		col = math.floor((vim.o.columns - width) / 2),
+		row = row,
+		col = col,
 		style = "minimal",
 		border = "rounded",
 		title = " Pairp ",
@@ -26,28 +66,32 @@ local function win_opts()
 	}
 end
 
-function M.open(cli_path)
+function M.open(cli_path, position, config, session_name)
+	local state = get_state(session_name)
+
 	-- If already open, focus it
-	if is_valid() then
+	if is_valid(state) then
 		vim.api.nvim_set_current_win(state.win)
 		return
 	end
 
+	local opts = win_opts(position, config)
+
 	-- Reuse existing buffer if the terminal is still running
 	if state.buf and vim.api.nvim_buf_is_valid(state.buf) and state.chan then
-		state.win = vim.api.nvim_open_win(state.buf, true, win_opts())
+		state.win = vim.api.nvim_open_win(state.buf, true, opts)
 		vim.cmd.startinsert()
 		return
 	end
 
 	-- Create a new terminal buffer
 	state.buf = vim.api.nvim_create_buf(false, true)
-	state.win = vim.api.nvim_open_win(state.buf, true, win_opts())
+	state.win = vim.api.nvim_open_win(state.buf, true, opts)
 
 	state.chan = vim.fn.termopen(cli_path, {
 		on_exit = function()
 			state.chan = nil
-			if is_valid() then
+			if is_valid(state) then
 				vim.api.nvim_win_close(state.win, true)
 			end
 			if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
@@ -55,30 +99,66 @@ function M.open(cli_path)
 			end
 			state.buf = nil
 			state.win = nil
+			sessions[state.name] = nil
 		end,
 	})
 
 	vim.cmd.startinsert()
 
-	-- q in normal mode closes the window (but keeps the terminal alive)
+	-- q in normal mode hides the window (keeps terminal alive)
 	vim.keymap.set("n", "q", function()
-		M.hide()
+		M.hide(session_name)
 	end, { buffer = state.buf, desc = "Hide Pairp window" })
+
+	-- Double <Esc> exits terminal mode
+	vim.keymap.set("t", "<Esc><Esc>", [[<C-\><C-n>]], { buffer = state.buf, desc = "Exit terminal mode" })
+
+	-- Reposition window on terminal resize
+	local augroup = vim.api.nvim_create_augroup("pairp_resize_" .. state.name, { clear = true })
+	vim.api.nvim_create_autocmd("VimResized", {
+		group = augroup,
+		callback = function()
+			if is_valid(state) then
+				vim.api.nvim_win_set_config(state.win, win_opts(position, config))
+			else
+				vim.api.nvim_del_augroup_by_id(augroup)
+			end
+		end,
+	})
 end
 
-function M.hide()
+function M.hide(session_name)
+	local state = get_state(session_name)
 	if state.win and vim.api.nvim_win_is_valid(state.win) then
 		vim.api.nvim_win_close(state.win, true)
 		state.win = nil
 	end
 end
 
-function M.toggle(cli_path)
-	if is_valid() then
-		M.hide()
+function M.toggle(cli_path, position, config, session_name)
+	local state = get_state(session_name)
+	if is_valid(state) then
+		M.hide(session_name)
 	else
-		M.open(cli_path)
+		M.open(cli_path, position, config, session_name)
 	end
+end
+
+function M.send_text(text, session_name)
+	local state = get_state(session_name)
+	if not state.chan then
+		vim.notify("Pairp: no active session", vim.log.levels.WARN)
+		return
+	end
+	vim.fn.chansend(state.chan, text)
+end
+
+function M.list_sessions()
+	local names = {}
+	for name, _ in pairs(sessions) do
+		table.insert(names, name)
+	end
+	return names
 end
 
 return M
