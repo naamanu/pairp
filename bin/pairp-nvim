@@ -42,12 +42,26 @@ automatically reload them in real-time (autoread + checktime).
 USAGE
 }
 
+int_or_nil() {
+  local value="${1:-}"
+  if [ -z "$value" ]; then
+    echo "nil"
+    return
+  fi
+  if [[ "$value" =~ ^-?[0-9]+$ ]]; then
+    echo "$value"
+    return
+  fi
+  echo "Error: expected integer argument, got '$value'" >&2
+  exit 1
+}
+
 case "${1:-}" in
   open)
     shift
     file=$(lua_escape "${1:?file required}")
-    line="${2:-nil}"
-    col="${3:-nil}"
+    line=$(int_or_nil "${2:-}")
+    col=$(int_or_nil "${3:-}")
     nvim_lua "vim.json.encode(PairpActions.open('${file}', ${line}, ${col}))"
     ;;
 

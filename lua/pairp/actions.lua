@@ -92,14 +92,12 @@ function M.start_watcher(interval_ms)
 	vim.o.autoread = true
 
 	-- Auto-reload all files without prompting while Claude is active
+	-- Use vimscript autocmd because setting vim.v.fcs_choice from Lua
+	-- callbacks does not reliably suppress the W13 confirm prompt.
 	watcher_augroup = vim.api.nvim_create_augroup("pairp_file_watcher", { clear = true })
-	vim.api.nvim_create_autocmd("FileChangedShell", {
-		group = watcher_augroup,
-		pattern = "*",
-		callback = function()
-			vim.v.fcs_choice = "reload"
-		end,
-	})
+	vim.cmd([[
+		autocmd pairp_file_watcher FileChangedShell * let v:fcs_choice = 'reload'
+	]])
 
 	watcher_timer = vim.uv.new_timer()
 	watcher_timer:start(

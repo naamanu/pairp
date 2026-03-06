@@ -6,7 +6,7 @@ M.check = function()
 	if vim.fn.has("nvim-0.10") == 1 then
 		vim.health.ok("Neovim >= 0.10")
 	else
-		vim.health.warn("Neovim >= 0.10 is recommended")
+		vim.health.error("Neovim >= 0.10 is required")
 	end
 
 	local cli_path = require("pairp").config.cli_path
