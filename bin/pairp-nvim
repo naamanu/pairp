@@ -21,7 +21,27 @@ nvim_lua() {
   echo "$result"
 }
 
-# Validate that a value is a positive integer.
+# Escape text for Lua single-quoted string inside luaeval("...").
+lua_escape() {
+  local s
+  s=$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g")
+  printf '%s' "$s" | sed -e 's/\\/\\\\/g'
+}
+
+# Ensure Pairp actions are available even if plugin startup order is delayed.
+with_pairp_actions() {
+  local inner_expr="$1"
+  printf "(function() if _G.PairpActions == nil then local ok, actions = pcall(require, 'pairp.actions'); if ok and actions and actions.register then actions.register() end end; if _G.PairpActions == nil then return vim.json.encode({ ok = false, error = 'PairpActions unavailable' }) end; return %s end)()" "$inner_expr"
+}
+
+# Check whether the remote Neovim has vim.base64 helpers available.
+has_remote_base64() {
+  local out
+  out=$(nvim --server "$NVIM_SERVER" --remote-expr "luaeval('(vim.base64 and vim.base64.decode) and 1 or 0')" 2>/dev/null || echo "0")
+  [ "$out" = "1" ]
+}
+
+# Validate that a value is a non-negative integer.
 require_int() {
   local label="$1" value="$2"
   if ! [[ "$value" =~ ^[0-9]+$ ]]; then
@@ -30,9 +50,7 @@ require_int() {
   fi
 }
 
-# Open a file in the editor. The filepath is base64-encoded before embedding
-# in the Lua expression so that any characters (quotes, backslashes, etc.)
-# are safe. Decoded on the Neovim side with vim.base64.decode().
+# Open a file in the editor.
 open_file() {
   local file="${1:?file required}"
   local line="${2:-}"
@@ -41,9 +59,6 @@ open_file() {
   # Resolve to absolute path so Neovim opens the right file regardless of cwd
   local abs_path
   abs_path=$(cd "$(dirname "$file")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$file")") || abs_path="$file"
-
-  local b64
-  b64=$(printf '%s' "$abs_path" | base64 | tr -d '\n')
 
   local lua_line="nil"
   local lua_col="nil"
@@ -56,7 +71,18 @@ open_file() {
     lua_col="$col"
   fi
 
-  nvim_lua "vim.json.encode(PairpActions.open(vim.base64.decode('${b64}'), ${lua_line}, ${lua_col}))"
+  local open_expr
+  if has_remote_base64; then
+    local b64
+    b64=$(printf '%s' "$abs_path" | base64 | tr -d '\n')
+    open_expr="vim.json.encode(PairpActions.open(vim.base64.decode('${b64}'), ${lua_line}, ${lua_col}))"
+  else
+    local escaped
+    escaped=$(lua_escape "$abs_path")
+    open_expr="vim.json.encode(PairpActions.open('${escaped}', ${lua_line}, ${lua_col}))"
+  fi
+
+  nvim_lua "$(with_pairp_actions "$open_expr")"
 }
 
 usage() {
@@ -80,7 +106,7 @@ case "${1:-}" in
     ;;
 
   buffers)
-    nvim_lua "vim.json.encode(PairpActions.buffers())"
+    nvim_lua "$(with_pairp_actions "vim.json.encode(PairpActions.buffers())")"
     ;;
 
   help|--help|-h|"")

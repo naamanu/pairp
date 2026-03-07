@@ -28,6 +28,12 @@ function M.setup(opts)
 		M.config[k] = v
 	end
 
+	-- Ensure RPC actions are available even when users lazy-load only the Lua module.
+	local ok, actions = pcall(require, "pairp.actions")
+	if ok and type(actions.register) == "function" then
+		actions.register()
+	end
+
 	vim.keymap.set("n", M.config.keymap, function()
 		M.toggle()
 	end, { desc = "Pairp: toggle Claude Code" })
