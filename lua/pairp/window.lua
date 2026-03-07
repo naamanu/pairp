@@ -244,10 +244,17 @@ function M.open(cli_path, position, config, session_name)
 	end, { buffer = state.buf, desc = "Hide Pairp window" })
 
 	-- <C-w> navigation from terminal mode
+	local function navigate_from_terminal(key)
+		vim.cmd.stopinsert()
+		vim.cmd.wincmd(key)
+		if state.win and vim.api.nvim_win_is_valid(state.win) and vim.api.nvim_get_current_win() == state.win then
+			vim.cmd.startinsert()
+		end
+	end
+
 	for _, key in ipairs({ "h", "j", "k", "l" }) do
 		vim.keymap.set("t", "<C-w>" .. key, function()
-			vim.cmd.stopinsert()
-			vim.cmd.wincmd(key)
+			navigate_from_terminal(key)
 		end, { buffer = state.buf, desc = "Navigate to window " .. key })
 	end
 
@@ -258,6 +265,22 @@ function M.open(cli_path, position, config, session_name)
 		callback = function()
 			if is_valid(state) then
 				vim.api.nvim_win_set_config(state.win, win_opts(position, config, session_name))
+			end
+		end,
+	})
+	vim.api.nvim_create_autocmd("WinEnter", {
+		group = augroup,
+		callback = function()
+			if state.win and vim.api.nvim_win_is_valid(state.win) and vim.api.nvim_get_current_win() == state.win then
+				vim.schedule(function()
+					if
+						state.win
+						and vim.api.nvim_win_is_valid(state.win)
+						and vim.api.nvim_get_current_win() == state.win
+					then
+						vim.cmd.startinsert()
+					end
+				end)
 			end
 		end,
 	})

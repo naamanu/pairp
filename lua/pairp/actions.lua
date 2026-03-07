@@ -63,6 +63,8 @@ function M.open(filepath, line, col)
 		return { ok = false, error = "filepath is required" }
 	end
 
+	local focus_win = vim.api.nvim_get_current_win()
+
 	-- Collect candidate windows (non-floating, non-terminal)
 	local candidates = {}
 	for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -76,14 +78,26 @@ function M.open(filepath, line, col)
 
 	local target_win
 	if #candidates > 0 then
-		-- Prefer the previous window (most recently used) if it's a candidate
-		local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))
+		-- Prefer the current window if it is an editor window.
+		local current_win = vim.api.nvim_get_current_win()
 		for _, win in ipairs(candidates) do
-			if win == prev_win then
+			if win == current_win then
 				target_win = win
 				break
 			end
 		end
+
+		-- Prefer the previous window (most recently used) if it's a candidate
+		if not target_win then
+			local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))
+			for _, win in ipairs(candidates) do
+				if win == prev_win then
+					target_win = win
+					break
+				end
+			end
+		end
+
 		-- Fall back to the largest candidate window
 		if not target_win then
 			local max_area = 0
@@ -102,9 +116,6 @@ function M.open(filepath, line, col)
 		target_win = vim.api.nvim_get_current_win()
 	end
 
-	-- Save current window so we can restore focus after opening
-	local prev_win = vim.api.nvim_get_current_win()
-
 	vim.api.nvim_set_current_win(target_win)
 	vim.cmd("silent edit " .. vim.fn.fnameescape(filepath))
 
@@ -122,8 +133,8 @@ function M.open(filepath, line, col)
 	end
 
 	-- Restore focus to the previous window (e.g. the Pairp terminal)
-	if vim.api.nvim_win_is_valid(prev_win) then
-		vim.api.nvim_set_current_win(prev_win)
+	if vim.api.nvim_win_is_valid(focus_win) then
+		vim.api.nvim_set_current_win(focus_win)
 	end
 
 	return { ok = true, file = opened_file }
