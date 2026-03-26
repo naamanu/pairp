@@ -69,3 +69,9 @@ end, {
 	nargs = "?",
 	complete = session_complete,
 })
+
+vim.api.nvim_create_user_command("PairpSwitch", function()
+	require("pairp").switch()
+end, {
+	desc = "Switch to a different Pairp session",
+})

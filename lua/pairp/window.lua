@@ -29,6 +29,16 @@ local function clamp(value, min_value, max_value)
 	return math.max(min_value, math.min(max_value, value))
 end
 
+local function safe_chansend(chan, text, session_name)
+	local ok = vim.fn.chansend(chan, text)
+	if ok == 0 then
+		local label = session_name or "default"
+		vim.notify("Pairp [" .. label .. "]: failed to send to terminal (channel dead)", vim.log.levels.ERROR)
+		return false
+	end
+	return true
+end
+
 local function setup_highlights()
 	local has_border = vim.api.nvim_get_hl(0, { name = "PairpBorder" })
 	if vim.tbl_isempty(has_border) then
@@ -55,16 +65,7 @@ local function is_valid(state)
 	return state.buf and vim.api.nvim_buf_is_valid(state.buf) and state.win and vim.api.nvim_win_is_valid(state.win)
 end
 
-local function build_border(position)
-	if
-		position == "right"
-		or position == "left"
-		or position == "top"
-		or position == "bottom"
-		or position == "center"
-	then
-		return { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
-	end
+local function build_border()
 	return { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
 end
 
@@ -114,7 +115,7 @@ local function win_opts(position, config, session_name)
 	local display_name = (session_name and session_name ~= "default") and session_name or nil
 	local title = display_name and (" Pairp: " .. display_name .. " ") or " Pairp "
 
-	local border_chars = build_border(position)
+	local border_chars = build_border()
 	local border = {}
 	for _, ch in ipairs(border_chars) do
 		table.insert(border, { ch, "PairpBorder" })
@@ -168,8 +169,14 @@ function M.open(cli_path, position, config, session_name)
 	vim.api.nvim_set_option_value("winhl", "Normal:PairpNormal,FloatBorder:PairpBorder", { win = state.win })
 
 	-- Inject pairp bin directory into PATH so Claude can use pairp-nvim
-	local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
-	local bin_dir = plugin_root .. "/bin"
+	local bin_candidates = vim.api.nvim_get_runtime_file("bin/pairp-nvim", false)
+	local bin_dir
+	if bin_candidates and #bin_candidates > 0 then
+		bin_dir = vim.fn.fnamemodify(bin_candidates[1], ":h")
+	else
+		local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
+		bin_dir = plugin_root .. "/bin"
+	end
 	local env = {
 		PAIRP = "1",
 		PATH = bin_dir .. ":" .. (vim.env.PATH or ""),
@@ -213,6 +220,10 @@ function M.open(cli_path, position, config, session_name)
 		"  pairp-nvim buffers                   - list open editor buffers",
 	}, " ")
 
+	if config and config.system_prompt and config.system_prompt ~= "" then
+		pairp_prompt = pairp_prompt .. "\n" .. config.system_prompt
+	end
+
 	local cmd = { cli_path, "--append-system-prompt", pairp_prompt }
 
 	state.chan = vim.fn.termopen(cmd, {
@@ -251,6 +262,18 @@ function M.open(cli_path, position, config, session_name)
 		end, { buffer = state.buf, desc = "Navigate to window " .. key })
 	end
 
+	-- Re-enter terminal mode when the Pairp window regains focus
+	-- Without this, the cursor behaves oddly because the terminal buffer
+	-- is left in normal mode after navigating away and back.
+	vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
+		buffer = state.buf,
+		callback = function()
+			if state.win and vim.api.nvim_win_is_valid(state.win) and vim.api.nvim_get_current_win() == state.win then
+				vim.cmd.startinsert()
+			end
+		end,
+	})
+
 	-- Reposition window on terminal resize
 	augroup = vim.api.nvim_create_augroup("pairp_resize_" .. state.name, { clear = true })
 	vim.api.nvim_create_autocmd("VimResized", {
@@ -271,6 +294,32 @@ function M.hide(session_name)
 	if state.win and vim.api.nvim_win_is_valid(state.win) then
 		vim.api.nvim_win_close(state.win, true)
 		state.win = nil
+	end
+end
+
+function M.show_session(session_name, config)
+	local target = get_state(session_name)
+	if not target then
+		vim.notify("Pairp: session not found: " .. tostring(session_name), vim.log.levels.WARN)
+		return
+	end
+	-- Hide all other visible sessions
+	for name, state in pairs(sessions) do
+		if name ~= normalize_session_name(session_name) and state.win and vim.api.nvim_win_is_valid(state.win) then
+			vim.api.nvim_win_close(state.win, true)
+			state.win = nil
+		end
+	end
+	-- Show the target session
+	if target.buf and vim.api.nvim_buf_is_valid(target.buf) and target.chan then
+		if not (target.win and vim.api.nvim_win_is_valid(target.win)) then
+			local position = config and config.position or "right"
+			local opts = win_opts(position, config, session_name)
+			target.win = vim.api.nvim_open_win(target.buf, true, opts)
+			vim.api.nvim_set_option_value("winhl", "Normal:PairpNormal,FloatBorder:PairpBorder", { win = target.win })
+		end
+		vim.api.nvim_set_current_win(target.win)
+		vim.cmd.startinsert()
 	end
 end
 
@@ -299,9 +348,9 @@ function M.send_text(text, session_name)
 	local state = get_state(session_name)
 	if not state or not state.chan then
 		vim.notify("Pairp: no active session", vim.log.levels.WARN)
-		return
+		return false
 	end
-	vim.fn.chansend(state.chan, text)
+	return safe_chansend(state.chan, text, state.name)
 end
 
 function M.list_sessions()
