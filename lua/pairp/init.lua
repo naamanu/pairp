@@ -82,6 +82,12 @@ function M.switch()
 		window.show_session(session_names[1], M.config)
 		return
 	end
+	-- Prefer Telescope if available
+	local has_telescope, _ = pcall(require, "telescope")
+	if has_telescope then
+		vim.cmd("Telescope pairp sessions")
+		return
+	end
 	vim.ui.select(session_names, { prompt = "Switch to Pairp session:" }, function(choice)
 		if choice then
 			window.show_session(choice, M.config)
@@ -108,6 +114,42 @@ function M.send_context(session_name)
 	window.send_text("Current file: " .. file .. "\n", session_name)
 end
 
+function M.send_diff(session_name)
+	local result = vim.fn.systemlist({ "git", "diff", "--no-color" })
+	if vim.v.shell_error ~= 0 then
+		vim.notify("Pairp: not in a git repository", vim.log.levels.WARN)
+		return
+	end
+	if #result == 0 then
+		vim.notify("Pairp: no unstaged changes", vim.log.levels.INFO)
+		return
+	end
+	local text = "Here is the current git diff:\n```diff\n" .. table.concat(result, "\n") .. "\n```\n"
+	window.send_text(text, session_name)
+end
+
+function M.send_diagnostics(session_name)
+	local buf = vim.api.nvim_get_current_buf()
+	local file = vim.api.nvim_buf_get_name(buf)
+	if file == "" then
+		vim.notify("Pairp: current buffer has no file", vim.log.levels.WARN)
+		return
+	end
+	local diags = vim.diagnostic.get(buf)
+	if #diags == 0 then
+		vim.notify("Pairp: no diagnostics in current buffer", vim.log.levels.INFO)
+		return
+	end
+	local severity_labels = { "ERROR", "WARN", "INFO", "HINT" }
+	local lines = { "Diagnostics for " .. file .. ":" }
+	for _, d in ipairs(diags) do
+		local sev = severity_labels[d.severity] or "UNKNOWN"
+		table.insert(lines, string.format("  Line %d: [%s] %s", d.lnum + 1, sev, d.message))
+	end
+	local text = table.concat(lines, "\n") .. "\n"
+	window.send_text(text, session_name)
+end
+
 function M.send_file(session_name)
 	local file = vim.api.nvim_buf_get_name(0)
 	local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
@@ -118,6 +160,129 @@ function M.send_file(session_name)
 	local header = file ~= "" and ("--- " .. file .. " ---\n") or "--- untitled buffer ---\n"
 	local text = header .. table.concat(buf_lines, "\n") .. "\n"
 	window.send_text(text, session_name)
+end
+
+function M.review()
+	local actions = require("pairp.actions")
+	local files = actions.get_tracked_files()
+	if #files == 0 then
+		vim.notify("Pairp: no files to review", vim.log.levels.INFO)
+		return
+	end
+	-- Filter to files that actually have git changes
+	local changed = {}
+	for _, file in ipairs(files) do
+		vim.fn.system({ "git", "diff", "--quiet", "--", file })
+		if vim.v.shell_error ~= 0 then
+			table.insert(changed, file)
+		end
+	end
+	if #changed == 0 then
+		vim.notify("Pairp: all tracked files are unchanged", vim.log.levels.INFO)
+		return
+	end
+	M._review_files = changed
+	M._review_index = 1
+	M._open_review_diff(changed[1])
+end
+
+function M._open_review_diff(file)
+	-- Open the working copy in a new tab
+	vim.cmd("tabnew " .. vim.fn.fnameescape(file))
+	local working_win = vim.api.nvim_get_current_win()
+	vim.cmd("diffthis")
+
+	-- Open the HEAD version in a vertical split
+	vim.cmd("vnew")
+	local rel_path = vim.fn.fnamemodify(file, ":.")
+	local head_content = vim.fn.systemlist({ "git", "show", "HEAD:" .. rel_path })
+	if vim.v.shell_error == 0 then
+		vim.api.nvim_buf_set_lines(0, 0, -1, false, head_content)
+	end
+	vim.bo.buftype = "nofile"
+	vim.bo.bufhidden = "wipe"
+	vim.bo.modifiable = false
+	vim.cmd("diffthis")
+
+	-- Focus the working copy for easier navigation
+	vim.api.nvim_set_current_win(working_win)
+
+	-- Set up review keymaps on both buffers in this tab
+	local tab = vim.api.nvim_get_current_tabpage()
+	for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+		local buf = vim.api.nvim_win_get_buf(win)
+		vim.keymap.set("n", "ga", function()
+			M._accept_current()
+		end, { buffer = buf, desc = "Pairp: accept changes" })
+		vim.keymap.set("n", "gr", function()
+			M._revert_current()
+		end, { buffer = buf, desc = "Pairp: revert to HEAD" })
+		vim.keymap.set("n", "gn", function()
+			M._next_review()
+		end, { buffer = buf, desc = "Pairp: next file" })
+		vim.keymap.set("n", "gq", function()
+			M._close_review()
+		end, { buffer = buf, desc = "Pairp: close review" })
+	end
+
+	local count = #M._review_files
+	vim.notify(
+		string.format("Review (%d/%d): [ga] accept  [gr] revert  [gn] next  [gq] close", M._review_index, count),
+		vim.log.levels.INFO
+	)
+end
+
+function M._close_review_tab()
+	vim.cmd("diffoff!")
+	vim.cmd("tabclose")
+end
+
+function M._accept_current()
+	M._close_review_tab()
+	M._next_review()
+end
+
+function M._revert_current()
+	local file = M._review_files[M._review_index]
+	vim.fn.system({ "git", "checkout", "HEAD", "--", file })
+	vim.cmd("silent! checktime")
+	M._close_review_tab()
+	M._next_review()
+end
+
+function M._next_review()
+	M._review_index = M._review_index + 1
+	if M._review_index > #M._review_files then
+		vim.notify("Pairp: review complete", vim.log.levels.INFO)
+		M._review_files = nil
+		M._review_index = nil
+		return
+	end
+	M._open_review_diff(M._review_files[M._review_index])
+end
+
+function M._close_review()
+	if M._review_index and M._review_index <= #M._review_files then
+		M._close_review_tab()
+	end
+	M._review_files = nil
+	M._review_index = nil
+	vim.notify("Pairp: review closed", vim.log.levels.INFO)
+end
+
+function M.revert_all()
+	local actions = require("pairp.actions")
+	local files = actions.get_tracked_files()
+	if #files == 0 then
+		vim.notify("Pairp: no files to revert", vim.log.levels.INFO)
+		return
+	end
+	for _, file in ipairs(files) do
+		vim.fn.system({ "git", "checkout", "HEAD", "--", file })
+	end
+	vim.cmd("silent! checktime")
+	vim.notify("Pairp: reverted " .. #files .. " file(s)", vim.log.levels.INFO)
+	actions.clear_tracked_files()
 end
 
 function M.statusline()

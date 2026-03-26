@@ -70,6 +70,36 @@ end, {
 	complete = session_complete,
 })
 
+vim.api.nvim_create_user_command("PairpReview", function()
+	require("pairp").review()
+end, {
+	desc = "Review Claude's changes with diff view",
+})
+
+vim.api.nvim_create_user_command("PairpRevertAll", function()
+	require("pairp").revert_all()
+end, {
+	desc = "Revert all files Claude touched",
+})
+
+vim.api.nvim_create_user_command("PairpDiff", function(opts)
+	local session = opts.args ~= "" and opts.args or nil
+	require("pairp").send_diff(session)
+end, {
+	desc = "Send git diff to Claude Code",
+	nargs = "?",
+	complete = session_complete,
+})
+
+vim.api.nvim_create_user_command("PairpDiagnostics", function(opts)
+	local session = opts.args ~= "" and opts.args or nil
+	require("pairp").send_diagnostics(session)
+end, {
+	desc = "Send LSP diagnostics to Claude Code",
+	nargs = "?",
+	complete = session_complete,
+})
+
 vim.api.nvim_create_user_command("PairpSwitch", function()
 	require("pairp").switch()
 end, {

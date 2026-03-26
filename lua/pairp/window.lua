@@ -372,4 +372,29 @@ function M.list_sessions()
 	return names
 end
 
+function M.get_session_details()
+	local details = {}
+	local stale = {}
+	for name, state in pairs(sessions) do
+		local has_buf = state.buf and vim.api.nvim_buf_is_valid(state.buf)
+		local has_win = state.win and vim.api.nvim_win_is_valid(state.win)
+		if state.chan or has_buf or has_win then
+			table.insert(details, {
+				name = name,
+				visible = has_win and true or false,
+				has_channel = state.chan ~= nil,
+			})
+		else
+			table.insert(stale, name)
+		end
+	end
+	for _, name in ipairs(stale) do
+		sessions[name] = nil
+	end
+	table.sort(details, function(a, b)
+		return a.name < b.name
+	end)
+	return details
+end
+
 return M

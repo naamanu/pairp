@@ -6,6 +6,7 @@ local buffer_file_exists = {}
 local dir_watchers = {} -- dir_path -> { handle = uv_fs_event_t, buf_count = number }
 local buf_dir_map = {} -- buf -> dir (for cleanup on BufDelete when name may be gone)
 local created_files_timer = nil
+local tracked_files = {} -- files opened by Claude via pairp-nvim
 
 local function is_file_buffer(buf)
 	if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_buf_is_loaded(buf) then
@@ -204,6 +205,11 @@ function M.open(filepath, line, col)
 		return { ok = false, error = tostring(result) }
 	end
 
+	-- Track files opened by Claude for review workflow
+	if result and not vim.tbl_contains(tracked_files, result) then
+		table.insert(tracked_files, result)
+	end
+
 	return { ok = true, file = result }
 end
 
@@ -299,6 +305,16 @@ function M.stop_watcher()
 	end
 	buffer_file_exists = {}
 	buf_dir_map = {}
+end
+
+--- Get files opened by Claude via pairp-nvim.
+function M.get_tracked_files()
+	return tracked_files
+end
+
+--- Clear the tracked files list.
+function M.clear_tracked_files()
+	tracked_files = {}
 end
 
 --- List open file buffers.
