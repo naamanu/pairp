@@ -91,6 +91,15 @@ end, {
 	complete = session_complete,
 })
 
+vim.api.nvim_create_user_command("PairpDiffStaged", function(opts)
+	local session = opts.args ~= "" and opts.args or nil
+	require("pairp").send_diff_staged(session)
+end, {
+	desc = "Send staged git diff to Claude Code",
+	nargs = "?",
+	complete = session_complete,
+})
+
 vim.api.nvim_create_user_command("PairpDiagnostics", function(opts)
 	local session = opts.args ~= "" and opts.args or nil
 	require("pairp").send_diagnostics(session)
@@ -104,4 +113,10 @@ vim.api.nvim_create_user_command("PairpSwitch", function()
 	require("pairp").switch()
 end, {
 	desc = "Switch to a different Pairp session",
+})
+
+vim.api.nvim_create_user_command("PairpMenu", function()
+	require("pairp").show_menu()
+end, {
+	desc = "Open Pairp actions menu",
 })

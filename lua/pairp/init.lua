@@ -12,6 +12,7 @@ M.config = {
 	height = 0.8,
 	watch_interval = 500,
 	system_prompt = "",
+	menu_keymap = "<leader>cm",
 }
 
 function M.setup(opts)
@@ -58,6 +59,10 @@ function M.setup(opts)
 	vim.keymap.set("n", M.config.context_keymap, function()
 		M.send_context()
 	end, { desc = "Pairp: send current file context" })
+
+	vim.keymap.set("n", M.config.menu_keymap, function()
+		M.show_menu()
+	end, { desc = "Pairp: open actions menu" })
 end
 
 function M.toggle(session_name)
@@ -96,11 +101,27 @@ function M.switch()
 end
 
 function M.send_selection(session_name)
-	local lines = vim.fn.getregion(vim.fn.getpos("v"), vim.fn.getpos("."), { type = vim.fn.mode() })
+	local start_pos = vim.fn.getpos("v")
+	local end_pos = vim.fn.getpos(".")
+	local lines = vim.fn.getregion(start_pos, end_pos, { type = vim.fn.mode() })
 	if #lines == 0 then
 		return
 	end
-	local text = table.concat(lines, "\n") .. "\n"
+
+	local file = vim.api.nvim_buf_get_name(0)
+	local start_line = start_pos[2]
+	local end_line = end_pos[2]
+	if start_line > end_line then
+		start_line, end_line = end_line, start_line
+	end
+
+	local header = ""
+	if file ~= "" then
+		local rel = vim.fn.fnamemodify(file, ":.")
+		header = "From " .. rel .. ":" .. start_line .. "-" .. end_line .. ":\n"
+	end
+
+	local text = header .. table.concat(lines, "\n") .. "\n"
 	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
 	window.send_text(text, session_name)
 end
@@ -125,6 +146,20 @@ function M.send_diff(session_name)
 		return
 	end
 	local text = "Here is the current git diff:\n```diff\n" .. table.concat(result, "\n") .. "\n```\n"
+	window.send_text(text, session_name)
+end
+
+function M.send_diff_staged(session_name)
+	local result = vim.fn.systemlist({ "git", "diff", "--cached", "--no-color" })
+	if vim.v.shell_error ~= 0 then
+		vim.notify("Pairp: not in a git repository", vim.log.levels.WARN)
+		return
+	end
+	if #result == 0 then
+		vim.notify("Pairp: no staged changes", vim.log.levels.INFO)
+		return
+	end
+	local text = "Here is the staged git diff:\n```diff\n" .. table.concat(result, "\n") .. "\n```\n"
 	window.send_text(text, session_name)
 end
 
@@ -283,6 +318,30 @@ function M.revert_all()
 	vim.cmd("silent! checktime")
 	vim.notify("Pairp: reverted " .. #files .. " file(s)", vim.log.levels.INFO)
 	actions.clear_tracked_files()
+end
+
+function M.show_menu(session_name)
+	local items = {
+		{ label = "Toggle window", action = function() M.toggle(session_name) end },
+		{ label = "Send file", action = function() M.send_file(session_name) end },
+		{ label = "Send diff", action = function() M.send_diff(session_name) end },
+		{ label = "Send staged diff", action = function() M.send_diff_staged(session_name) end },
+		{ label = "Send diagnostics", action = function() M.send_diagnostics(session_name) end },
+		{ label = "Review changes", action = function() M.review() end },
+		{ label = "Revert all", action = function() M.revert_all() end },
+		{ label = "Switch session", action = function() M.switch() end },
+	}
+	vim.ui.select(
+		vim.tbl_map(function(item)
+			return item.label
+		end, items),
+		{ prompt = "Pairp Actions:" },
+		function(_, idx)
+			if idx then
+				items[idx].action()
+			end
+		end
+	)
 end
 
 function M.statusline()
